@@ -50,7 +50,18 @@ describe('sockjs.js', function() {
                 var previous = _sock;
                 _sock.onclose();
                 expect(_sock).toNotEqual(previous);
-            })
+            });
+
+            describe('without socket uri', function() {
+                beforeEach(function() {
+                    _sock = undefined;
+                    topicRegistryMock['config.initialized']({});
+                });
+
+                it('test', function() {
+                    expect(_sock).toBeUndefined();
+                })
+            });
         });
     });
 

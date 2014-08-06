@@ -21,7 +21,7 @@ function SockJSFactory(config, topicMessageDispatcher, topicRegistry) {
 
 
     topicRegistry.subscribe('config.initialized', function (config) {
-        init();
+        if (config.socketUri) init();
     });
     return {
         send: function(data) {
