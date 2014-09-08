@@ -1,7 +1,7 @@
 angular.module('binarta.sockjs', [])
-    .factory('sockJS', ['config', 'topicMessageDispatcher', 'topicRegistry', SockJSFactory]);
+    .factory('sockJS', ['config', 'topicMessageDispatcher', SockJSFactory]);
 
-function SockJSFactory(config, topicMessageDispatcher, topicRegistry) {
+function SockJSFactory(config, topicMessageDispatcher) {
     var sock = undefined;
 
     var init = function() {
@@ -19,10 +19,7 @@ function SockJSFactory(config, topicMessageDispatcher, topicRegistry) {
         }
     };
 
-
-    topicRegistry.subscribe('config.initialized', function (config) {
-        if (config.socketUri) init();
-    });
+    if (config.socketUri) init();
     return {
         send: function(data) {
             sock.send(JSON.stringify(data));

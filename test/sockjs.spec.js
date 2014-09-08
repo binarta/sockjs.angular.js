@@ -11,64 +11,58 @@ describe('sockjs.js', function() {
     beforeEach(module('binarta.sockjs'));
 
     beforeEach(inject(function(_config_, _topicMessageDispatcherMock_, _topicRegistryMock_) {
-        config = _config_;
+        config = {};
         topicMessageDispatcherMock = _topicMessageDispatcherMock_;
         topicRegistryMock = _topicRegistryMock_;
     }));
 
     describe('sockJS', function() {
-       beforeEach(inject(function(topicMessageDispatcher, sockJS) {
+       beforeEach(inject(function(topicMessageDispatcher) {
            config.socketUri = 'http://localhost:8888/';
-           sut = sockJS;
+           sut = SockJSFactory(config, topicMessageDispatcher)
        }));
 
-        describe('on config.initialized', function() {
-            beforeEach(function() {
-                topicRegistryMock['config.initialized'](config);
-            });
+        it('socket uri is passed', function() {
+            expect(_sock.url).toEqual(config.socketUri);
+        });
 
-            it('socket uri is passed', function() {
-                expect(_sock.url).toEqual(config.socketUri);
-            });
+        it('on open fire sockjs.loaded', function() {
+            _sock.onopen();
+            expect(topicMessageDispatcherMock.persistent['sockjs.loaded']).toEqual('ok');
+        });
 
-            it('on open fire sockjs.loaded', function() {
-                _sock.onopen();
-                expect(topicMessageDispatcherMock.persistent['sockjs.loaded']).toEqual('ok');
-            });
+        it('on message fire notification for response address', function() {
+            _sock.onmessage({data: JSON.stringify({topic:'T', payload:'P'})});
+            expect(topicMessageDispatcherMock['T']).toEqual('P');
+        });
 
-            it('on message fire notification for response address', function() {
-                _sock.onmessage({data: JSON.stringify({topic:'T', payload:'P'})});
-                expect(topicMessageDispatcherMock['T']).toEqual('P');
-            });
+        it('send data over socket', function() {
+            sut.send({payload:'P'});
+            expect(_sock.data).toEqual(JSON.stringify({payload:'P'}));
+        });
 
-            it('send data over socket', function() {
-                sut.send({payload:'P'});
-                expect(_sock.data).toEqual(JSON.stringify({payload:'P'}));
-            });
+        it('on close re init socket', function() {
+            var previous = _sock;
+            _sock.onclose();
+            expect(_sock).toNotEqual(previous);
+        });
 
-            it('on close re init socket', function() {
-                var previous = _sock;
-                _sock.onclose();
-                expect(_sock).toNotEqual(previous);
-            });
+        describe('without socket uri', function() {
+            beforeEach(inject(function(topicMessageDispatcher) {
+                _sock = undefined;
+                sut = SockJSFactory({}, topicMessageDispatcher)
+            }));
 
-            describe('without socket uri', function() {
-                beforeEach(function() {
-                    _sock = undefined;
-                    topicRegistryMock['config.initialized']({});
-                });
-
-                it('test', function() {
-                    expect(_sock).toBeUndefined();
-                })
-            });
+            it('test', function() {
+                expect(_sock).toBeUndefined();
+            })
         });
     });
 
 });
 
-function SockJS(url) {
-    _sock = {url:url, send: function(data) {_sock.data = data}};
+function SockJS(url, ignored, args) {
+    _sock = {url:url, send: function(data) {_sock.data = data}, args: args};
     return _sock;
 }
 
