@@ -1,28 +1,54 @@
 angular.module('binarta.sockjs', [])
-    .factory('sockJS', ['config', 'topicMessageDispatcher', SockJSFactory]);
+    .provider('sockJS', SockJSProvider);
 
-function SockJSFactory(config, topicMessageDispatcher) {
-    var sock = undefined;
+function SockJSProvider() {
+    return {
+        $get: SockJSFactory
+    }
+}
+
+function SockJSFactory(config, $q) {
+    var sock;
+    var opened = false;
+    var isSocketOpenedDeferred = $q.defer();
+
+    var responseDeferrals = {};
+
+    function deferralForTopic(args) {
+        return responseDeferrals[args.topic] || {resolve:function() {}}
+    }
+
+    function reset() {
+        isSocketOpenedDeferred = $q.defer();
+        responseDeferrals = {};
+    }
 
     var init = function() {
-        sock = SockJS(config.socketUri);
+        sock = SockJS(config.socketUri, {}, {debug:true});
 
         sock.onopen = function() {
-            topicMessageDispatcher.firePersistently('sockjs.loaded', 'ok');
+            opened = true;
+            isSocketOpenedDeferred.resolve();
         };
         sock.onmessage = function(message) {
             var data = JSON.parse(message.data);
-            topicMessageDispatcher.fire(data.topic, data.payload);
+            deferralForTopic(data).resolve(data.payload);
         };
         sock.onclose = function() {
+            if (opened) reset();
+            opened = false;
             init();
         }
     };
-
     if (config.socketUri) init();
     return {
         send: function(data) {
-            sock.send(JSON.stringify(data));
+            var deferredResponse = $q.defer();
+            responseDeferrals[data.responseAddress] = deferredResponse;
+            isSocketOpenedDeferred.promise.then(function() {
+                sock.send(JSON.stringify(data));
+            });
+            return deferredResponse.promise;
         }
     }
 }
