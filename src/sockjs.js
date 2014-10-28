@@ -7,32 +7,43 @@ function SockJSProvider() {
     }
 }
 
-function SockJSFactory(config, $q) {
+function SockJSFactory(config, $q, $window) {
     var sock;
     var opened = false;
     var isSocketOpenedDeferred = $q.defer();
+    var version = 0;
 
-    var responseDeferrals = {};
+    var responsesHolder = {};
 
     function deferralForTopic(args) {
-        return responseDeferrals[args.topic] || {resolve:function() {}}
+        var request = responsesHolder[args.topic];
+        return request ? request.deferral : {resolve:function(){}}
     }
 
     function reset() {
         isSocketOpenedDeferred = $q.defer();
-        responseDeferrals = {};
     }
 
     var init = function() {
+        version++;
         sock = SockJS(config.socketUri, {}, {debug:true});
+        $window.onbeforeunload = function() {
+            sock.onclose = undefined;
+            sock.close();
+        };
 
         sock.onopen = function() {
+            Object.keys(responsesHolder).forEach(function(key){
+                var response = responsesHolder[key];
+                if (response.version < version) sock.send(JSON.stringify(response.request));
+            });
             opened = true;
             isSocketOpenedDeferred.resolve();
         };
         sock.onmessage = function(message) {
             var data = JSON.parse(message.data);
             deferralForTopic(data).resolve(data.payload);
+            delete responsesHolder[data.topic];
         };
         sock.onclose = function() {
             if (opened) reset();
@@ -43,12 +54,12 @@ function SockJSFactory(config, $q) {
     if (config.socketUri) init();
     return {
         send: function(data) {
-            var deferredResponse = $q.defer();
-            responseDeferrals[data.responseAddress] = deferredResponse;
+            var deferral = $q.defer();
+            responsesHolder[data.responseAddress] = {deferral: deferral, request: data, version: version};
             isSocketOpenedDeferred.promise.then(function() {
                 sock.send(JSON.stringify(data));
             });
-            return deferredResponse.promise;
+            return deferral.promise;
         }
     }
 }

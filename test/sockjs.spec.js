@@ -19,9 +19,9 @@ describe('sockjs.js', function() {
     }));
 
     describe('sockJS', function() {
-       beforeEach(inject(function(topicMessageDispatcher, $q) {
+       beforeEach(inject(function(topicMessageDispatcher, $q, $window) {
            config.socketUri = 'http://localhost:8888/';
-           sut = SockJSProvider().$get(config, $q)
+           sut = SockJSProvider().$get(config, $q, $window)
        }));
 
         it('socket uri is passed', function() {
@@ -36,7 +36,7 @@ describe('sockjs.js', function() {
             });
 
             it('then no data was sent across the socket', function() {
-                expect(_sock.data).toBeUndefined();
+                expect(_sock.data).toEqual([]);
             });
 
             describe('and the socket is opened', function() {
@@ -46,7 +46,28 @@ describe('sockjs.js', function() {
                 });
 
                 it('then the data is sent upon opening', function() {
-                    expect(_sock.data).toEqual(JSON.stringify({responseAddress:'R', data:'D'}));
+                    expect(_sock.data[0]).toEqual(JSON.stringify({responseAddress:'R', data:'D'}));
+                });
+
+                it('data is only sent once', function() {
+                    expect(_sock.data[1]).toBeUndefined();
+                });
+
+                describe('and the socket is closed before receiving a response', function() {
+                    beforeEach(function() {
+                        _sock.onclose();
+                    });
+
+                    describe('and it is opened again', function() {
+                        beforeEach(function() {
+                            _sock.onopen();
+                            $rootScope.$digest();
+                        });
+
+                        it('the data was sent again', function() {
+                            expect(_sock.data[0]).toEqual(JSON.stringify({responseAddress:'R', data:'D'}));
+                        });
+                    });
                 });
 
                 describe('and an answer is received', function() {
@@ -55,8 +76,33 @@ describe('sockjs.js', function() {
                     });
 
                     it('then the response promise was resolved', function() {
-                        expect(getExecutedHandlerFor(promise)).toHaveBeenCalledWith('P')
-                    })
+                        expect(getExecutedHandlerFor(promise)).toHaveBeenCalledWith('P');
+                        expect(getExecutedHandlerFor(promise).callCount).toEqual(1);
+                    });
+
+                    describe('and answer is received again', function() {
+                        beforeEach(function() {
+                            _sock.onmessage({data:JSON.stringify({topic:'R', payload:'P'})});
+                        });
+
+                        it('then promise is not resolved again', function() {
+                            expect(getExecutedHandlerFor(promise).callCount).toEqual(1);
+                        })
+                    });
+
+                    describe('and page gets refreshed', function() {
+                        beforeEach(inject(function($window) {
+                            $window.onbeforeunload();
+                        }));
+
+                        it('onclose hook is disabled', function() {
+                            expect(_sock.onclose).toBeUndefined();
+                        });
+
+                        it('test', function() {
+                            expect(_sock.closed).toBeTruthy();
+                        })
+                    });
                 });
 
                 describe('and we send another message', function() {
@@ -75,7 +121,7 @@ describe('sockjs.js', function() {
                             });
 
                             it('test', function() {
-                                expect(getExecutedHandlerFor(promise)).not.toHaveBeenCalled();
+                                expect(getExecutedHandlerFor(promise)).toHaveBeenCalledWith('P');
                             })
                         });
                     });
@@ -98,7 +144,7 @@ describe('sockjs.js', function() {
 
                             it('no data was sent', function() {
                                 $rootScope.$digest();
-                                expect(_sock.data).toBeUndefined();
+                                expect(_sock.data).toEqual([]);
                             });
 
                             describe('and the socket is open again', function() {
@@ -108,7 +154,7 @@ describe('sockjs.js', function() {
                                 });
 
                                 it('test', function() {
-                                    expect(_sock.data).toEqual(JSON.stringify({responseAddress:'RR', data:'D'}));
+                                    expect(_sock.data[1]).toEqual(JSON.stringify({responseAddress:'RR', data:'D'}));
                                 })
                             });
                         });
@@ -135,11 +181,11 @@ describe('sockjs.js', function() {
             })
         });
     });
-
 });
 
 function SockJS(url, ignored, args) {
-    _sock = {url:url, send: function(data) {_sock.data = data}, args: args};
+    _sock = {url:url, send: function(data) {_sock.data.push(data)}, args: args, close: function() {_sock.closed = true }};
+    _sock.data = [];
     return _sock;
 }
 
