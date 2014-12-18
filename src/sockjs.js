@@ -3,7 +3,7 @@ angular.module('binarta.sockjs', [])
 
 function SockJSProvider() {
     return {
-        $get: SockJSFactory
+        $get: ['config', '$q', '$window', SockJSFactory]
     }
 }
 

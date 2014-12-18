@@ -21,7 +21,7 @@ describe('sockjs.js', function() {
     describe('sockJS', function() {
        beforeEach(inject(function(topicMessageDispatcher, $q, $window) {
            config.socketUri = 'http://localhost:8888/';
-           sut = SockJSProvider().$get(config, $q, $window)
+           sut = SockJSProvider().$get[3](config, $q, $window)
        }));
 
         it('socket uri is passed', function() {
