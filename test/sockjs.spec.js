@@ -3,23 +3,18 @@ var _sock;
 describe('sockjs.js', function() {
     var config;
     var sut;
-    var topicMessageDispatcherMock;
-    var topicRegistryMock;
     var $rootScope;
 
     beforeEach(module('config'));
-    beforeEach(module('notifications'));
     beforeEach(module('binarta.sockjs'));
 
-    beforeEach(inject(function(_config_, _topicMessageDispatcherMock_, _topicRegistryMock_, _$rootScope_) {
+    beforeEach(inject(function(_config_, _$rootScope_) {
         config = {};
-        topicMessageDispatcherMock = _topicMessageDispatcherMock_;
-        topicRegistryMock = _topicRegistryMock_;
         $rootScope = _$rootScope_;
     }));
 
     describe('sockJS', function() {
-       beforeEach(inject(function(topicMessageDispatcher, $q, $window) {
+       beforeEach(inject(function($q, $window) {
            config.socketUri = 'http://localhost:8888/';
            sut = SockJSProvider().$get[3](config, $q, $window)
        }));
@@ -171,9 +166,9 @@ describe('sockjs.js', function() {
         }
 
         describe('without socket uri', function() {
-            beforeEach(inject(function(topicMessageDispatcher) {
+            beforeEach(inject(function() {
                 _sock = undefined;
-                sut = SockJSProvider({}, topicMessageDispatcher)
+                sut = SockJSProvider({})
             }));
 
             it('test', function() {

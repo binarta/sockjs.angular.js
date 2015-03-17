@@ -1,4 +1,4 @@
-angular.module('binarta.sockjs', [])
+angular.module('binarta.sockjs', ['config'])
     .provider('sockJS', SockJSProvider);
 
 function SockJSProvider() {
