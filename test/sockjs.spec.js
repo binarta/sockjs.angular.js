@@ -1,155 +1,271 @@
-var _sock;
+describe('connection handler spec', function () {
+    var $scope, adapter, client, now, maxReconnectionAttempts, resetRetriesTimeout, timedout;
 
-describe('sockjs.js', function() {
-    var config;
-    var sut;
-    var $rootScope;
-
-    beforeEach(module('config'));
-    beforeEach(module('binarta.sockjs'));
-
-    beforeEach(inject(function(_config_, _$rootScope_) {
-        config = {};
-        $rootScope = _$rootScope_;
+    beforeEach(inject(function ($q, $rootScope) {
+        $scope = $rootScope;
+        now = 0;
+        maxReconnectionAttempts = 4;
+        resetRetriesTimeout = 300;
+        client = new DummyConnection();
+        adapter = new ConnectionLifecycleAdapter({
+            client: client,
+            maxReconnectionAttempts: maxReconnectionAttempts,
+            resetRetriesTimeout: resetRetriesTimeout
+        });
+        adapter.$q = $q;
+        adapter.ontimeout = function() {
+            timedout = true;
+        };
+        adapter.timestampingReconnectionHandler = function () {
+            adapter.reconnectionHandler(now * 1000)
+        };
     }));
 
-    describe('sockJS', function() {
-       beforeEach(inject(function($q, $window) {
-           config.socketUri = 'http://localhost:8888/';
-           sut = SockJSProvider().$get[3](config, $q, $window)
-       }));
+    it('starts out disconnected', function () {
+        expect(adapter.isDisconnected()).toEqual(true);
+    });
 
-        it('socket uri is passed', function() {
-            expect(_sock.url).toEqual(config.socketUri);
+    describe('when connected', function () {
+        beforeEach(function () {
+            adapter.internalConnect(now);
+            client.open();
         });
 
-        describe('when message is sent before socket is open', function() {
-            var promise;
+        it('shutdown', function() {
+            adapter.shutdown();
+            expect(adapter.isDisconnected()).toEqual(true);
+            expect(client.connected).toEqual(false);
+        });
 
-            beforeEach(function() {
-                promise = sut.send({responseAddress:'R', data:'D'});
+        it('expose connection status', function () {
+            expect(adapter.isDisconnected()).toEqual(false);
+            expect(adapter.isConnected()).toEqual(true);
+        });
+
+        it('connection status on mock', function () {
+            expect(client.connected).toEqual(true);
+            expect(client.timesConnected).toEqual(1);
+        });
+
+        it('closing connection reconnects', function () {
+            client.close();
+            client.open();
+            expect(client.timesConnected).toEqual(2);
+            expect(adapter.isConnected()).toEqual(true);
+
+            client.close();
+            client.open();
+            expect(client.timesConnected).toEqual(3);
+            expect(adapter.isConnected()).toEqual(true);
+        });
+
+        it('reconnect on close attempts are limited', function () {
+            client.close();
+            client.open();
+            client.close();
+            client.open();
+            client.close();
+            client.open();
+            client.close();
+            expect(client.timesConnected).toEqual(4);
+            expect(adapter.isDisconnected()).toEqual(true);
+        });
+
+        it('test', function () {
+            client.close();
+            client.open();
+            client.close();
+            client.open();
+            client.close();
+            client.open();
+            client.close();
+            expect(timedout).toEqual(true);
+        });
+
+        it('connection errors reconnect', function () {
+            client.error();
+            client.open();
+            expect(client.timesConnected).toEqual(2);
+            expect(adapter.isConnected()).toEqual(true);
+
+            client.error();
+            client.open();
+            expect(client.timesConnected).toEqual(3);
+            expect(adapter.isConnected()).toEqual(true);
+        });
+
+        it('reconnect on error attempts are limited', function () {
+            client.error();
+            client.open();
+            client.error();
+            client.open();
+            client.error();
+            client.open();
+            client.error();
+            expect(client.timesConnected).toEqual(4);
+            expect(adapter.isDisconnected()).toEqual(true);
+        });
+
+        it('reset retry limit when timeout reached', function () {
+            client.close();
+            client.open();
+            client.close();
+            client.open();
+            client.close();
+            client.open();
+
+            now = resetRetriesTimeout;
+            client.close();
+            client.open();
+
+            expect(client.timesConnected).toEqual(5);
+            expect(adapter.isConnected()).toEqual(true);
+        });
+    });
+
+    describe('when message is sent before socket is open', function () {
+        var capturedResponses = [];
+
+        beforeEach(function () {
+            adapter.internalConnect(now);
+            adapter.send({
+                payload: {responseAddress: 'R', data: 'D'},
+                onMessage: function (it) {
+                    capturedResponses.push(it);
+                }
+            });
+        });
+
+        it('then no data was sent', function () {
+            expect(client.capturedMessages).toEqual([]);
+        });
+
+        describe('and the socket is opened', function () {
+            beforeEach(function () {
+                adapter.internalConnect(now);
+                client.open();
             });
 
-            it('then no data was sent across the socket', function() {
-                expect(_sock.data).toEqual([]);
+            it('then the data is sent upon opening', function () {
+                expect(client.capturedMessages[0]).toEqual(JSON.stringify({responseAddress: 'R', data: 'D'}));
             });
 
-            describe('and the socket is opened', function() {
-                beforeEach(function() {
-                    _sock.onopen();
-                    $rootScope.$digest();
+            it('data is only sent once', function () {
+                expect(client.capturedMessages[1]).toBeUndefined();
+            });
+
+            it('send while open connection', function() {
+                adapter.send({
+                    payload: {responseAddress: 'O', data: 'D'},
+                    onMessage: function (it) {
+                        capturedResponses.push(it);
+                    }
+                });
+                $scope.$digest();
+                expect(client.capturedMessages[1]).toEqual(JSON.stringify({responseAddress: 'O', data: 'D'}));
+            });
+
+            describe('and the socket is closed before receiving a response', function () {
+                beforeEach(function () {
+                    client.close();
                 });
 
-                it('then the data is sent upon opening', function() {
-                    expect(_sock.data[0]).toEqual(JSON.stringify({responseAddress:'R', data:'D'}));
+                describe('and it is opened again', function () {
+                    beforeEach(function () {
+                        client.open();
+                    });
+
+                    it('the data was sent again', function () {
+                        expect(client.capturedMessages[1]).toEqual(JSON.stringify({responseAddress: 'R', data: 'D'}));
+                    });
+                });
+            });
+
+            describe('and an answer is received', function () {
+                beforeEach(function () {
+                    client.respondWith({payload: JSON.stringify({topic: 'R', payload: 'P'})});
+                    $scope.$digest();
                 });
 
-                it('data is only sent once', function() {
-                    expect(_sock.data[1]).toBeUndefined();
+                it('then the response promise was resolved', function () {
+                    expect(capturedResponses[0]).toEqual('P');
+                    $scope.$digest();
+                    expect(capturedResponses[1]).toBeUndefined();
                 });
 
-                describe('and the socket is closed before receiving a response', function() {
+                describe('and answer is received again', function() {
                     beforeEach(function() {
-                        _sock.onclose();
+                        capturedResponses = [];
+                        client.respondWith({payload: JSON.stringify({topic: 'R', payload: 'P'})});
+                        $scope.$digest();
                     });
 
-                    describe('and it is opened again', function() {
-                        beforeEach(function() {
-                            _sock.onopen();
-                            $rootScope.$digest();
-                        });
-
-                        it('the data was sent again', function() {
-                            expect(_sock.data[0]).toEqual(JSON.stringify({responseAddress:'R', data:'D'}));
-                        });
-                    });
-                });
-
-                describe('and an answer is received', function() {
-                    beforeEach(function() {
-                        _sock.onmessage({data:JSON.stringify({topic:'R', payload:'P'})});
-                    });
-
-                    it('then the response promise was resolved', function() {
-                        expect(getExecutedHandlerFor(promise)).toHaveBeenCalledWith('P');
-                        expect(getExecutedHandlerFor(promise).callCount).toEqual(1);
-                    });
-
-                    describe('and answer is received again', function() {
-                        beforeEach(function() {
-                            _sock.onmessage({data:JSON.stringify({topic:'R', payload:'P'})});
-                        });
-
-                        it('then promise is not resolved again', function() {
-                            expect(getExecutedHandlerFor(promise).callCount).toEqual(1);
-                        })
-                    });
-
-                    describe('and page gets refreshed', function() {
-                        beforeEach(inject(function($window) {
-                            $window.onbeforeunload();
-                        }));
-
-                        it('onclose hook is disabled', function() {
-                            expect(_sock.onclose).toBeUndefined();
-                        });
-
-                        it('test', function() {
-                            expect(_sock.closed).toBeTruthy();
-                        })
-                    });
+                    it('then promise is not resolved again', function() {
+                        expect(capturedResponses[0]).toBeUndefined();
+                    })
                 });
 
                 describe('and we send another message', function() {
                     beforeEach(function() {
-                        promise = sut.send({responseAddress:'RR', data:'D'});
+                        adapter.send({
+                            payload: {responseAddress: 'RR', data: 'D'},
+                            onMessage: function (it) {
+                                capturedResponses.push(it);
+                            }
+                        });
                     });
 
                     describe('but socket was closed', function() {
                         beforeEach(function() {
-                            _sock.onclose();
+                            client.close();
                         });
 
                         describe('but we still receive a response somehow', function() {
                             beforeEach(function() {
-                                _sock.onmessage({data:JSON.stringify({topic:'RR', payload:'P'})});
+                                client.respondWith({payload: JSON.stringify({topic: 'RR', payload: 'PP'})});
+                                $scope.$digest();
                             });
 
                             it('test', function() {
-                                expect(getExecutedHandlerFor(promise)).toHaveBeenCalledWith('P');
+                                expect(capturedResponses[1]).toEqual('PP');
                             })
                         });
                     });
                 });
 
                 describe('and the socket was closed again', function() {
-                    beforeEach(function() {
-                        _sock.onclose();
+                    beforeEach(function () {
+                        client.close();
                     });
 
-                    describe('and data was sent while being closed', function() {
-                        beforeEach(function() {
-                            promise = sut.send({responseAddress:'RR', data:'D'});
+                    describe('and data was sent while being closed', function () {
+                        beforeEach(function () {
+                            client.capturedMessages = [];
+                            adapter.send({
+                                payload: {responseAddress: 'RR', data: 'D'},
+                                onMessage: function (it) {
+                                    capturedResponses.push(it);
+                                }
+                            });
                         });
 
-                        describe('and we failed to re initialize the socket', function() {
-                            beforeEach(function() {
-                                _sock.onclose();
+                        describe('and we failed to re initialize the socket', function () {
+                            beforeEach(function () {
+                                client.close();
                             });
 
-                            it('no data was sent', function() {
-                                $rootScope.$digest();
-                                expect(_sock.data).toEqual([]);
+                            it('no data was sent', function () {
+                                expect(client.capturedMessages).toEqual([]);
                             });
 
-                            describe('and the socket is open again', function() {
-                                beforeEach(function() {
-                                    _sock.onopen();
-                                    $rootScope.$apply();
+                            describe('and the socket is open again', function () {
+                                beforeEach(function () {
+                                    client.open();
                                 });
 
-                                it('test', function() {
-                                    expect(_sock.data[1]).toEqual(JSON.stringify({responseAddress:'RR', data:'D'}));
+                                it('test', function () {
+                                    expect(adapter.isConnected()).toEqual(true);
+                                    expect(client.capturedMessages[0]).toEqual(JSON.stringify({responseAddress: 'RR', data: 'D'}));
                                 })
                             });
                         });
@@ -157,30 +273,46 @@ describe('sockjs.js', function() {
                 });
             });
         });
-
-        function getExecutedHandlerFor(promise) {
-            var handler = jasmine.createSpy('handler');
-            promise.then(handler);
-            $rootScope.$digest();
-            return handler;
-        }
-
-        describe('without socket uri', function() {
-            beforeEach(inject(function() {
-                _sock = undefined;
-                sut = SockJSProvider({})
-            }));
-
-            it('test', function() {
-                expect(_sock).toBeUndefined();
-            })
-        });
-    });
+    })
 });
 
-function SockJS(url, ignored, args) {
-    _sock = {url:url, send: function(data) {_sock.data.push(data)}, args: args, close: function() {_sock.closed = true }};
-    _sock.data = [];
-    return _sock;
-}
+function DummyConnection() {
+    this.timesConnected = 0;
+    this.capturedMessages = [];
 
+    this.connect = function (app) {
+        this.app = app;
+        this.connected = true;
+        this.timesConnected++;
+    };
+
+    this.open = function () {
+        this.app.opened();
+    };
+
+    this.close = function () {
+        var app = this.app;
+        this.app = undefined;
+        this.connected = false;
+        app.closed();
+    };
+
+    this.error = function () {
+        var app = this.app;
+        this.app = undefined;
+        this.connected = false;
+        app.error();
+    };
+
+    this.send = function (args) {
+        this.capturedMessages.push(args);
+    };
+
+    this.respondWith = function (args) {
+        this.app.onMessage(args.payload);
+    };
+
+    this.disconnect = function() {
+        this.close();
+    };
+}
