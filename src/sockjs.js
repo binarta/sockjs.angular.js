@@ -48,15 +48,11 @@ angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback'])
         }
 
     }])
-    .run(['connectionLifecycleAdapter', '$window', 'notificationPresenter', 'sockJsFallbackClient', function (adapter, $window, notify, fallbackClient) {
+    .run(['connectionLifecycleAdapter', '$window', '$log', 'sockJsFallbackClient', function (adapter, $window, $log, fallbackClient) {
         adapter.ontimeout = function () {
             adapter.client = fallbackClient;
             adapter.connect();
-            notify({
-                type: 'warning',
-                title: 'degraded!',
-                text: 'We could not establish a stable connection to the server. Switching to fallback protocol which may cause degraded performance.'
-            });
+            $log.info('Connecting to web socket timed out. Switching to fallback protocol.');
         };
         adapter.connect();
         $window.onbeforeunload = adapter.shutdown;
