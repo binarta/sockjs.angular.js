@@ -1,5 +1,5 @@
 describe('connection handler spec', function () {
-    var $scope, adapter, client, now, maxReconnectionAttempts, resetRetriesTimeout, timedout;
+    var $scope, adapter, client, now, maxReconnectionAttempts, resetRetriesTimeout, timedout, journal;
 
     beforeEach(inject(function ($q, $rootScope) {
         $scope = $rootScope;
@@ -7,13 +7,15 @@ describe('connection handler spec', function () {
         maxReconnectionAttempts = 4;
         resetRetriesTimeout = 300;
         client = new DummyConnection();
+        journal = new DummyJournal();
         adapter = new ConnectionLifecycleAdapter({
             client: client,
             maxReconnectionAttempts: maxReconnectionAttempts,
-            resetRetriesTimeout: resetRetriesTimeout
+            resetRetriesTimeout: resetRetriesTimeout,
+            journaler: journal.journaler
         });
         adapter.$q = $q;
-        adapter.ontimeout = function() {
+        adapter.ontimeout = function () {
             timedout = true;
         };
         adapter.timestampingReconnectionHandler = function () {
@@ -31,7 +33,7 @@ describe('connection handler spec', function () {
             client.open();
         });
 
-        it('shutdown', function() {
+        it('shutdown', function () {
             adapter.shutdown();
             expect(adapter.isDisconnected()).toEqual(true);
             expect(client.connected).toEqual(false);
@@ -146,6 +148,16 @@ describe('connection handler spec', function () {
                 client.open();
             });
 
+            it('connection is journaled', function () {
+                expect(journal.events[0]).toEqual({
+                    from: 'ui.client.sockjs',
+                    payload: {
+                        mode: 'default',
+                        numberOfConnectionAttempts: 2
+                    }
+                });
+            });
+
             it('then the data is sent upon opening', function () {
                 expect(client.capturedMessages[0]).toEqual(JSON.stringify({responseAddress: 'R', data: 'D'}));
             });
@@ -154,7 +166,7 @@ describe('connection handler spec', function () {
                 expect(client.capturedMessages[1]).toBeUndefined();
             });
 
-            it('send while open connection', function() {
+            it('send while open connection', function () {
                 adapter.send({
                     payload: {responseAddress: 'O', data: 'D'},
                     onMessage: function (it) {
@@ -193,20 +205,20 @@ describe('connection handler spec', function () {
                     expect(capturedResponses[1]).toBeUndefined();
                 });
 
-                describe('and answer is received again', function() {
-                    beforeEach(function() {
+                describe('and answer is received again', function () {
+                    beforeEach(function () {
                         capturedResponses = [];
                         client.respondWith({payload: JSON.stringify({topic: 'R', payload: 'P'})});
                         $scope.$digest();
                     });
 
-                    it('then promise is not resolved again', function() {
+                    it('then promise is not resolved again', function () {
                         expect(capturedResponses[0]).toBeUndefined();
                     })
                 });
 
-                describe('and we send another message', function() {
-                    beforeEach(function() {
+                describe('and we send another message', function () {
+                    beforeEach(function () {
                         adapter.send({
                             payload: {responseAddress: 'RR', data: 'D'},
                             onMessage: function (it) {
@@ -215,25 +227,25 @@ describe('connection handler spec', function () {
                         });
                     });
 
-                    describe('but socket was closed', function() {
-                        beforeEach(function() {
+                    describe('but socket was closed', function () {
+                        beforeEach(function () {
                             client.close();
                         });
 
-                        describe('but we still receive a response somehow', function() {
-                            beforeEach(function() {
+                        describe('but we still receive a response somehow', function () {
+                            beforeEach(function () {
                                 client.respondWith({payload: JSON.stringify({topic: 'RR', payload: 'PP'})});
                                 $scope.$digest();
                             });
 
-                            it('test', function() {
+                            it('test', function () {
                                 expect(capturedResponses[1]).toEqual('PP');
                             })
                         });
                     });
                 });
 
-                describe('and the socket was closed again', function() {
+                describe('and the socket was closed again', function () {
                     beforeEach(function () {
                         client.close();
                     });
@@ -265,7 +277,10 @@ describe('connection handler spec', function () {
 
                                 it('test', function () {
                                     expect(adapter.isConnected()).toEqual(true);
-                                    expect(client.capturedMessages[0]).toEqual(JSON.stringify({responseAddress: 'RR', data: 'D'}));
+                                    expect(client.capturedMessages[0]).toEqual(JSON.stringify({
+                                        responseAddress: 'RR',
+                                        data: 'D'
+                                    }));
                                 })
                             });
                         });
@@ -312,7 +327,17 @@ function DummyConnection() {
         this.app.onMessage(args.payload);
     };
 
-    this.disconnect = function() {
+    this.disconnect = function () {
         this.close();
     };
+}
+
+function DummyJournal() {
+    var self = this;
+
+    this.events = [];
+
+    this.journaler = function (evt) {
+        self.events.push(evt);
+    }
 }

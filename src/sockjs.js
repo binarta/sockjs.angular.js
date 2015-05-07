@@ -1,4 +1,4 @@
-angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback'])
+angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback', 'journal'])
     .factory('sockJsClientWrapper', ['config', function (config) {
         function SockJSClientWrapper() {
             var sock;
@@ -23,11 +23,12 @@ angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback'])
 
         return new SockJSClientWrapper();
     }])
-    .factory('connectionLifecycleAdapter', ['$q', '$timeout', 'sockJsClientWrapper', function ($q, $timeout, client) {
+    .factory('connectionLifecycleAdapter', ['$q', '$timeout', 'sockJsClientWrapper', 'journaler', function ($q, $timeout, client, journaler) {
         var adapter = new ConnectionLifecycleAdapter({
             client: client,
             maxReconnectionAttempts: 3,
-            resetRetriesTimeout: 60
+            resetRetriesTimeout: 60,
+            journaler: journaler
         });
         adapter.$q = $q;
         adapter.timeout = function (cb, delay) {
@@ -50,6 +51,7 @@ angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback'])
     }])
     .run(['connectionLifecycleAdapter', '$window', '$log', 'sockJsFallbackClient', function (adapter, $window, $log, fallbackClient) {
         adapter.ontimeout = function () {
+            adapter.mode = 'fallback';
             adapter.client = fallbackClient;
             adapter.connect();
             $log.info('Connecting to web socket timed out. Switching to fallback protocol.');
@@ -60,7 +62,9 @@ angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback'])
 
 function ConnectionLifecycleAdapter(args) {
     var self = this;
+    this.mode = 'default';
     this.client = args.client;
+    var journaler = args.journaler;
     var connected = false;
     var connectionStartTime = -1;
     var delayBetweenReconnects = 500;
@@ -117,6 +121,13 @@ function ConnectionLifecycleAdapter(args) {
                 if (response.version < numberOfConnectionAttempts) self.client.send(JSON.stringify(response.request));
             });
             isSocketOpenedDeferred.resolve();
+            journaler({
+                from: 'ui.client.sockjs',
+                payload: {
+                    mode: self.mode,
+                    numberOfConnectionAttempts: numberOfConnectionAttempts
+                }
+            });
         },
         onMessage: function (message) {
             var data = JSON.parse(message);
