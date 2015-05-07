@@ -1,4 +1,4 @@
-angular.module('binarta.sockjs', ['config', 'notifications'])
+angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback'])
     .factory('sockJsClientWrapper', ['config', function (config) {
         function SockJSClientWrapper() {
             var sock;
@@ -48,13 +48,14 @@ angular.module('binarta.sockjs', ['config', 'notifications'])
         }
 
     }])
-    .run(['connectionLifecycleAdapter', '$window', 'notificationPresenter', function (adapter, $window, notify) {
+    .run(['connectionLifecycleAdapter', '$window', 'notificationPresenter', 'sockJsFallbackClient', function (adapter, $window, notify, fallbackClient) {
         adapter.ontimeout = function () {
+            adapter.client = fallbackClient;
+            adapter.connect();
             notify({
                 type: 'warning',
-                title: 'disconnected!',
-                text: 'We could not establish a connection to the server. Refresh the page to try again.',
-                persistent: true
+                title: 'degraded!',
+                text: 'We could not establish a stable connection to the server. Switching to fallback protocol which may cause degraded performance.'
             });
         };
         adapter.connect();
@@ -63,7 +64,7 @@ angular.module('binarta.sockjs', ['config', 'notifications'])
 
 function ConnectionLifecycleAdapter(args) {
     var self = this;
-    var client = args.client;
+    this.client = args.client;
     var connected = false;
     var connectionStartTime = -1;
     var delayBetweenReconnects = 500;
@@ -117,7 +118,7 @@ function ConnectionLifecycleAdapter(args) {
             connected = true;
             Object.keys(responsesHolder).forEach(function (key) {
                 var response = responsesHolder[key];
-                if (response.version < numberOfConnectionAttempts) client.send(JSON.stringify(response.request));
+                if (response.version < numberOfConnectionAttempts) self.client.send(JSON.stringify(response.request));
             });
             isSocketOpenedDeferred.resolve();
         },
@@ -144,7 +145,7 @@ function ConnectionLifecycleAdapter(args) {
             reset();
         }
         numberOfConnectionAttempts++;
-        client.connect(eventHandler);
+        self.client.connect(eventHandler);
     };
     this.connect = function () {
         self.internalConnect(new Date().getTime());
@@ -159,12 +160,12 @@ function ConnectionLifecycleAdapter(args) {
         };
         deferral.promise.then(args.onMessage);
         isSocketOpenedDeferred.promise.then(function () {
-            client.send(JSON.stringify(args.payload));
+            self.client.send(JSON.stringify(args.payload));
         });
     };
 
     this.shutdown = function () {
         shutdown = true;
-        client.disconnect();
+        self.client.disconnect();
     }
 }
