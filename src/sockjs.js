@@ -13,7 +13,7 @@ angular.module('binarta.sockjs', ['config', 'notifications', 'sockjs.fallback', 
             };
 
             this.send = function (args) {
-                sock.send(args)
+                sock.send(args);
             };
 
             this.disconnect = function () {
