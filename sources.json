@@ -1,5 +1,6 @@
 {
   "default": {
+    "sockjs-client": "bower_components/sockjs-client/dist/sockjs.min.js",
     "sockjs": "bower_components/binarta.sockjs.angular/src/sockjs.js"
   }
 }
